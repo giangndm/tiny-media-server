@@ -88,7 +88,7 @@ pub trait WebrtcTask {
     fn tick(&mut self, now: Instant) -> bool;
     /// return true if have action to process
     fn input<'b>(&mut self, now: Instant, event: WebrtcTaskInput<'b>) -> bool;
-    fn pop_action(&mut self) -> Option<WebrtcTaskOutput>;
+    fn pop_action(&mut self, now: Instant) -> Option<WebrtcTaskOutput>;
 }
 
 pub enum ComposeTask {
@@ -118,10 +118,10 @@ impl WebrtcTask for ComposeTask {
         }
     }
 
-    fn pop_action(&mut self) -> Option<WebrtcTaskOutput> {
+    fn pop_action(&mut self, now: Instant) -> Option<WebrtcTaskOutput> {
         match self {
-            ComposeTask::Whip(task) => task.pop_action(),
-            ComposeTask::Whep(task) => task.pop_action(),
+            ComposeTask::Whip(task) => task.pop_action(now),
+            ComposeTask::Whep(task) => task.pop_action(now),
         }
     }
 }

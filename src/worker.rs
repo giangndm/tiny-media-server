@@ -5,6 +5,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
+use str0m::change::DtlsCert;
 
 use crossbeam::channel::{Receiver, Sender};
 
@@ -52,6 +53,7 @@ pub struct Worker {
     task_remotes: HashMap<SocketAddr, usize>,
     task_ufrags: HashMap<String, usize>,
     ended_tasks: Vec<usize>,
+    dtls_cert: DtlsCert,
 }
 
 impl Worker {
@@ -77,6 +79,7 @@ impl Worker {
             task_remotes: HashMap::new(),
             task_ufrags: HashMap::new(),
             ended_tasks: Vec::new(),
+            dtls_cert: DtlsCert::new_openssl(),
         }
     }
 
@@ -85,7 +88,7 @@ impl Worker {
         self.process_bus_recv();
         self.process_http();
         self.process_tick();
-        self.pop_tasks();
+        self.pop_tasks(Instant::now());
         self.pop_ended_tasks();
         let elapsed = started.elapsed();
         let timeout = if elapsed < Duration::from_millis(1) {
@@ -114,6 +117,7 @@ impl Worker {
                         self.task_id_seed += 1;
 
                         let task = ComposeTask::Whip(crate::tasks::whip::WhipServerTask::new(
+                            self.dtls_cert.clone(),
                             req,
                             vec![self.udp_addr],
                         ));
@@ -122,6 +126,7 @@ impl Worker {
                         self.task_ufrags.insert(task.ufrag(), task_id);
                         let mut task_container = task.into();
                         Self::pop_task(
+                            Instant::now(),
                             task_id,
                             &mut task_container,
                             &self.udp_socket,
@@ -138,6 +143,7 @@ impl Worker {
                         self.task_id_seed += 1;
 
                         let task = ComposeTask::Whep(crate::tasks::whep::WhepServerTask::new(
+                            self.dtls_cert.clone(),
                             req,
                             vec![self.udp_addr],
                         ));
@@ -146,6 +152,7 @@ impl Worker {
                         self.task_ufrags.insert(task.ufrag(), task_id);
                         let mut task_container = task.into();
                         Self::pop_task(
+                            Instant::now(),
                             task_id,
                             &mut task_container,
                             &self.udp_socket,
@@ -197,11 +204,11 @@ impl Worker {
 
     fn process_udp(&mut self, timeout: Duration) {
         log::trace!("Processing udp with timeout: {:?}", timeout);
-        let now = Instant::now();
         self.udp_socket
             .set_read_timeout(Some(timeout))
             .expect("Should set a timeout");
         while let Ok((size, remote)) = self.udp_socket.recv_from(&mut self.udp_buffer) {
+            let now = Instant::now();
             log::trace!("Received udp packet from {:?}, size: {}", remote, size);
             let slot = if let Some(task_id) = self.task_remotes.get(&remote) {
                 if let Some(task) = self.tasks.get_mut(task_id) {
@@ -246,6 +253,7 @@ impl Worker {
 
                 //we should pop_task here because str0m don't store pending incomming packets in queue, only flag. If call here we lost some events
                 Self::pop_task(
+                    now,
                     task_id,
                     task,
                     &self.udp_socket,
@@ -266,9 +274,10 @@ impl Worker {
             .map(|u| u.split(':').next().expect("Should have a pair username"))
     }
 
-    fn pop_tasks(&mut self) {
+    fn pop_tasks(&mut self, now: Instant) {
         for (task_id, task) in self.tasks.iter_mut() {
             Self::pop_task(
+                now,
                 *task_id,
                 task,
                 &self.udp_socket,
@@ -281,6 +290,7 @@ impl Worker {
     }
 
     fn pop_task(
+        now: Instant,
         task_id: usize,
         task: &mut TaskContainer,
         udp_socket: &UdpSocket,
@@ -289,7 +299,7 @@ impl Worker {
         bus_channels: &mut HashMap<u64, BusChannelContainer>,
         ended_tasks: &mut Vec<usize>,
     ) {
-        while let Some(action) = task.task.pop_action() {
+        while let Some(action) = task.task.pop_action(now) {
             match action {
                 WebrtcTaskOutput::Io(IoAction::UdpSocketSend { from: _, to, buf }) => {
                     if let Err(e) = udp_socket.send_to(&buf, to) {

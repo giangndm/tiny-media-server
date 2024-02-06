@@ -5,7 +5,7 @@ use std::{
 };
 
 use str0m::{
-    change::SdpOffer,
+    change::{DtlsCert, SdpOffer},
     media::MediaKind,
     net::{Protocol, Receive},
     Candidate, Event, IceConnectionState, Input, Output, Rtc,
@@ -28,13 +28,20 @@ pub struct WhipServerTask {
 }
 
 impl WhipServerTask {
-    pub fn new(req: HttpRequest, local_addrs: Vec<SocketAddr>) -> WhipServerTask {
+    pub fn new(
+        dtls_cert: DtlsCert,
+        req: HttpRequest,
+        local_addrs: Vec<SocketAddr>,
+    ) -> WhipServerTask {
         log::debug!(
             "WhipServerTask::new req: {} addr {:?}",
             req.path,
             local_addrs
         );
-        let rtc_config = Rtc::builder().set_rtp_mode(true).set_ice_lite(true);
+        let rtc_config = Rtc::builder()
+            .set_rtp_mode(true)
+            .set_ice_lite(true)
+            .set_dtls_cert(dtls_cert);
 
         let channel = req
             .headers
@@ -90,6 +97,8 @@ impl WebrtcTask for WhipServerTask {
                 if let Err(e) = self.rtc.handle_input(Input::Timeout(now)) {
                     log::error!("Error handling timeout: {}", e);
                 }
+                log::debug!("clear timeout after handled");
+                self.timeout = None;
                 return true;
             }
         }
@@ -108,20 +117,29 @@ impl WebrtcTask for WhipServerTask {
                 )) {
                     log::error!("Error handling udp: {}", e);
                 }
+                log::debug!("clear timeout with udp");
+                self.timeout = None;
                 true
             }
             _ => panic!("Should not receive this event."),
         }
     }
 
-    fn pop_action(&mut self) -> Option<WebrtcTaskOutput> {
+    fn pop_action(&mut self, now: Instant) -> Option<WebrtcTaskOutput> {
         if let Some(o) = self.outputs.pop_front() {
             return Some(o);
+        }
+
+        if let Some(timeout) = self.timeout {
+            if timeout > now {
+                return None;
+            }
         }
 
         match self.rtc.poll_output().ok()? {
             Output::Timeout(timeout) => {
                 self.timeout = Some(timeout);
+                log::debug!("set timeout after {:?}", timeout - now);
                 None
             }
             Output::Transmit(send) => Some(
