@@ -5,7 +5,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
-use str0m::change::DtlsCert;
+use str0m::{change::DtlsCert, media::KeyframeRequestKind};
 
 use crossbeam::channel::{Receiver, Sender};
 
@@ -16,17 +16,19 @@ use crate::{
 
 pub enum BusEvent {
     TrackMedia(TrackMedia),
-    TrackPli(u64),
+    TrackKeyframeRequest(u64, KeyframeRequestKind),
 }
 
 struct BusChannelContainer {
+    sources: Vec<usize>,
     consumers: Vec<usize>,
 }
 
 struct TaskContainer {
     task: ComposeTask,
     remotes: Vec<SocketAddr>,
-    channels: Vec<u64>,
+    sub_channels: Vec<u64>,
+    pub_channels: Vec<u64>,
 }
 
 impl From<ComposeTask> for TaskContainer {
@@ -34,7 +36,8 @@ impl From<ComposeTask> for TaskContainer {
         TaskContainer {
             task,
             remotes: Vec::new(),
-            channels: Vec::new(),
+            sub_channels: Vec::new(),
+            pub_channels: Vec::new(),
         }
     }
 }
@@ -195,8 +198,17 @@ impl Worker {
                         }
                     }
                 }
-                BusEvent::TrackPli(_track_id) => {
-                    todo!()
+                BusEvent::TrackKeyframeRequest(track_id, kind) => {
+                    if let Some(channel) = self.bus_channels.get(&track_id) {
+                        for source in &channel.sources {
+                            if let Some(task) = self.tasks.get_mut(source) {
+                                task.task.input(
+                                    Instant::now(),
+                                    WebrtcTaskInput::RequestKeyframeTrack { track_id, kind },
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -316,20 +328,40 @@ impl Worker {
                         log::error!("Failed to send track media to bus: {}", e.to_string());
                     }
                 }
+                WebrtcTaskOutput::RequestKeyframeTrack { track_id, kind } => {
+                    if let Err(e) =
+                        bus_send.try_send(BusEvent::TrackKeyframeRequest(track_id, kind))
+                    {
+                        log::error!("Failed to send keyframe request to bus: {}", e.to_string());
+                    }
+                }
                 WebrtcTaskOutput::TaskEnded => {
                     log::info!("Task {task_id} ended");
                     ended_tasks.push(task_id);
+                }
+                WebrtcTaskOutput::PublishTrack { track_id } => {
+                    log::info!("Task {task_id} published track {track_id}");
+                    bus_channels
+                        .entry(track_id)
+                        .or_insert(BusChannelContainer {
+                            sources: Vec::new(),
+                            consumers: Vec::new(),
+                        })
+                        .sources
+                        .push(task_id);
+                    task.pub_channels.push(track_id);
                 }
                 WebrtcTaskOutput::SubscribeTrack { track_id } => {
                     log::info!("Task {task_id} subscribed to track {track_id}");
                     bus_channels
                         .entry(track_id)
                         .or_insert(BusChannelContainer {
+                            sources: Vec::new(),
                             consumers: Vec::new(),
                         })
                         .consumers
                         .push(task_id);
-                    task.channels.push(track_id);
+                    task.sub_channels.push(track_id);
                 }
             }
         }
@@ -342,10 +374,18 @@ impl Worker {
                 self.task_remotes.remove(&remote);
             }
             self.task_ufrags.remove(&container.task.ufrag());
-            for track_id in container.channels {
+            for track_id in container.sub_channels {
                 if let Some(channel) = self.bus_channels.get_mut(&track_id) {
                     channel.consumers.retain(|c| *c != task_id);
-                    if channel.consumers.is_empty() {
+                    if channel.consumers.is_empty() && channel.sources.is_empty() {
+                        self.bus_channels.remove(&track_id);
+                    }
+                }
+            }
+            for track_id in container.pub_channels {
+                if let Some(channel) = self.bus_channels.get_mut(&track_id) {
+                    channel.consumers.retain(|c| *c != task_id);
+                    if channel.consumers.is_empty() && channel.sources.is_empty() {
                         self.bus_channels.remove(&track_id);
                     }
                 }

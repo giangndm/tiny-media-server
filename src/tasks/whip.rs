@@ -6,12 +6,13 @@ use std::{
 
 use str0m::{
     change::{DtlsCert, SdpOffer},
-    media::MediaKind,
+    media::{MediaKind, Mid},
     net::{Protocol, Receive},
     Candidate, Event, IceConnectionState, Input, Output, Rtc,
 };
 
 use crate::{
+    http::get_http_auth,
     io::{HttpRequest, HttpResponse, IoAction, IoEvent},
     tasks::{track_id_builder, TrackMedia},
 };
@@ -23,6 +24,8 @@ pub struct WhipServerTask {
     timeout: Option<Instant>,
     rtc: Rtc,
     outputs: VecDeque<WebrtcTaskOutput>,
+    audio_mid: Option<Mid>,
+    video_mid: Option<Mid>,
     audio_track_id: u64,
     video_track_id: u64,
 }
@@ -33,21 +36,18 @@ impl WhipServerTask {
         req: HttpRequest,
         local_addrs: Vec<SocketAddr>,
     ) -> WhipServerTask {
-        log::debug!(
-            "WhipServerTask::new req: {} addr {:?}",
-            req.path,
-            local_addrs
-        );
         let rtc_config = Rtc::builder()
             .set_rtp_mode(true)
             .set_ice_lite(true)
             .set_dtls_cert(dtls_cert);
 
-        let channel = req
-            .headers
-            .get("Authorization")
-            .map(|v| v.clone())
-            .unwrap_or_else(|| "demo".to_string());
+        let channel = get_http_auth(&req);
+        log::info!(
+            "WhipServerTask::new req: {} addr {:?} => channel {}",
+            req.path,
+            local_addrs,
+            channel,
+        );
         let ice_ufrag = rtc_config.local_ice_credentials().ufrag.clone();
 
         let mut rtc = rtc_config.build();
@@ -80,6 +80,8 @@ impl WhipServerTask {
                 body: answer.to_sdp_string().as_bytes().to_vec(),
             })
             .into()]),
+            audio_mid: None,
+            video_mid: None,
             audio_track_id: track_id_builder(&channel, MediaKind::Audio),
             video_track_id: track_id_builder(&channel, MediaKind::Video),
         }
@@ -121,6 +123,22 @@ impl WebrtcTask for WhipServerTask {
                 self.timeout = None;
                 true
             }
+            WebrtcTaskInput::RequestKeyframeTrack { track_id, kind } => {
+                if track_id == self.video_track_id {
+                    if let Some(mid) = self.video_mid {
+                        log::info!("Requesting keyframe for video mid: {:?}", mid);
+                        self.rtc
+                            .direct_api()
+                            .stream_rx_by_mid(mid, None)
+                            .expect("Should has video mid")
+                            .request_keyframe(kind);
+                    } else {
+                        log::error!("No video mid for requesting keyframe");
+                    }
+                }
+
+                true
+            }
             _ => panic!("Should not receive this event."),
         }
     }
@@ -153,10 +171,21 @@ impl WebrtcTask for WhipServerTask {
             Output::Event(e) => match e {
                 Event::Connected => {
                     log::info!("WhipServerTask connected");
+                    self.outputs.push_back(WebrtcTaskOutput::PublishTrack {
+                        track_id: self.audio_track_id,
+                    });
+                    self.outputs.push_back(WebrtcTaskOutput::PublishTrack {
+                        track_id: self.video_track_id,
+                    });
                     None
                 }
                 Event::MediaAdded(media) => {
                     log::info!("WhipServerTask media added: {:?}", media);
+                    if media.kind == MediaKind::Audio {
+                        self.audio_mid = Some(media.mid);
+                    } else {
+                        self.video_mid = Some(media.mid);
+                    }
                     None
                 }
                 Event::IceConnectionStateChange(state) => match state {

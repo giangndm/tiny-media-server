@@ -12,6 +12,7 @@ use str0m::{
 };
 
 use crate::{
+    http::get_http_auth,
     io::{HttpRequest, HttpResponse, IoAction, IoEvent},
     tasks::track_id_builder,
 };
@@ -34,21 +35,18 @@ impl WhepServerTask {
         req: HttpRequest,
         local_addrs: Vec<SocketAddr>,
     ) -> WhepServerTask {
-        log::debug!(
-            "WhepServerTask::new req: {} addr {:?}",
-            req.path,
-            local_addrs
-        );
         let rtc_config = Rtc::builder()
             .set_rtp_mode(true)
             .set_ice_lite(true)
             .set_dtls_cert(dtls_cert);
 
-        let channel = req
-            .headers
-            .get("Authorization")
-            .map(|v| v.clone())
-            .unwrap_or_else(|| "demo".to_string());
+        let channel = get_http_auth(&req);
+        log::info!(
+            "WhepServerTask::new req: {} addr {:?} => channel {}",
+            req.path,
+            local_addrs,
+            channel,
+        );
         let ice_ufrag = rtc_config.local_ice_credentials().ufrag.clone();
 
         let mut rtc = rtc_config.build();
@@ -147,10 +145,13 @@ impl WebrtcTask for WhepServerTask {
                         log::debug!("clear timeout with media");
                         self.timeout = None;
                     }
+                } else {
+                    log::error!("No mid for media {}", media.header.payload_type);
                 }
 
                 true
             }
+            _ => panic!("Should not receive this event."),
         }
     }
 
@@ -203,6 +204,13 @@ impl WebrtcTask for WhepServerTask {
                     IceConnectionState::Disconnected => Some(WebrtcTaskOutput::TaskEnded),
                     _ => None,
                 },
+                Event::KeyframeRequest(mid) => {
+                    log::info!("WhepServerTask keyframe request: {:?}", mid);
+                    Some(WebrtcTaskOutput::RequestKeyframeTrack {
+                        track_id: track_id_builder(&self.channel, MediaKind::Video),
+                        kind: mid.kind,
+                    })
+                }
                 _ => None,
             },
         }

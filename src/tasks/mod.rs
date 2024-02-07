@@ -4,7 +4,7 @@ use std::{
 };
 
 use str0m::{
-    media::{MediaKind, MediaTime},
+    media::{KeyframeRequestKind, MediaKind, MediaTime},
     rtp::{RtpHeader, RtpPacket, SeqNo},
 };
 
@@ -61,6 +61,10 @@ impl TrackMedia {
 pub enum WebrtcTaskInput<'a> {
     Io(IoEvent<'a>),
     TrackMedia(TrackMedia),
+    RequestKeyframeTrack {
+        track_id: u64,
+        kind: KeyframeRequestKind,
+    },
 }
 
 impl<'a> From<IoEvent<'a>> for WebrtcTaskInput<'a> {
@@ -73,7 +77,16 @@ pub enum WebrtcTaskOutput {
     Io(IoAction),
     TrackMedia(TrackMedia),
     TaskEnded,
-    SubscribeTrack { track_id: u64 },
+    PublishTrack {
+        track_id: u64,
+    },
+    SubscribeTrack {
+        track_id: u64,
+    },
+    RequestKeyframeTrack {
+        track_id: u64,
+        kind: KeyframeRequestKind,
+    },
 }
 
 impl From<IoAction> for WebrtcTaskOutput {
