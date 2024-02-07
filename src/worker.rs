@@ -2,6 +2,7 @@ use bus::{Bus, BusReader};
 use faster_stun::attribute::*;
 use faster_stun::*;
 use parking_lot::Mutex;
+use socket2::{Domain, Socket, Type};
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr, UdpSocket},
@@ -71,8 +72,17 @@ impl Worker {
         bus_send: Arc<Mutex<Bus<BusEvent>>>,
         bus_recv: BusReader<BusEvent>,
     ) -> Worker {
-        let socket = std::net::UdpSocket::bind(SocketAddr::new(ip_addr, 0))
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).expect("Should create a socket");
+        socket
+            .bind(&SocketAddr::new(ip_addr, 0).into())
             .expect("Should bind to a udp port");
+        socket
+            .set_send_buffer_size(1024 * 1024)
+            .expect("Should set send buffer size");
+        socket
+            .set_recv_buffer_size(1024 * 1024)
+            .expect("Should set recv buffer size");
+        let socket: UdpSocket = socket.into();
 
         Worker {
             task_id_seed: 0,
