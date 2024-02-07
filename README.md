@@ -20,11 +20,28 @@ Everything is SAN-I/O.
 - [ ] Io-Uring
 - [ ] AF_XDP
 
-## Benchmarks
+### Updateds
 
-Based: aws c6a.xlarge 4cores 8GB
+## Benchmark results
 
-Update1: `sendmmsg` not improving much.
+- `sendmmsg` not improving much.
+- upgrade from c6a.xlarge to c7i.xlarge, 4cores 8GB, 1.5x performance improvement, now 1core can serve ~500 viewers.
+
+### AWS c7i.xlarge 4cores 8GB
+
+Default build release: `cargo build --release`
+
+| Cores | Viewers | CPU % | Memory | Network(whep benchmark report) | Network OS report |
+| ----- | ------- | ----- | ------ | ------------------------------ | ----------------- |
+| 4     | 500     | 104%  | 7.1%   | 950 Mbps                       | TODO              |
+| 4     | 1000    | 210%  | 14.2%  | 1.92 Gbps                      | TODO              |
+
+Compared with Livekit:
+
+| Cores | Viewers | CPU % | Memory | Network(cli report) | Network OS report |
+| ----- | ------- | ----- | ------ | ------------------- | ----------------- |
+
+### AWS c6a.xlarge 4cores 8GB
 
 Default build release: `cargo build --release`
 
