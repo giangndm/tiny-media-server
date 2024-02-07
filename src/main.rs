@@ -134,6 +134,12 @@ fn main() {
                         )
                         .unwrap(),
                     );
+                    response.add_header(
+                        Header::from_bytes("Access-Control-Allow-Headers", "*").unwrap(),
+                    );
+                    response.add_header(
+                        Header::from_bytes("Access-Control-Allow-Credentials", "true").unwrap(),
+                    );
                     req.respond(response).unwrap();
                 }
                 _ => panic!("Should not receive this event."),
