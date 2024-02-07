@@ -13,6 +13,8 @@ use str0m::{change::DtlsCert, media::KeyframeRequestKind};
 
 use crossbeam::channel::{Receiver, Sender};
 
+const CYCLE_MS: Duration = Duration::from_millis(1);
+
 use crate::{
     io::{HttpResponse, IoAction, IoEvent},
     tasks::{ComposeTask, TrackMedia, WebrtcTask, WebrtcTaskInput, WebrtcTaskOutput},
@@ -82,6 +84,9 @@ impl Worker {
         socket
             .set_recv_buffer_size(1024 * 1024)
             .expect("Should set recv buffer size");
+        socket
+            .set_nonblocking(true)
+            .expect("Should set nonblocking");
         let socket: UdpSocket = socket.into();
 
         Worker {
@@ -109,14 +114,11 @@ impl Worker {
         self.process_tick();
         self.pop_tasks(Instant::now());
         self.pop_ended_tasks();
+        self.process_udp();
         let elapsed = started.elapsed();
-        let timeout = if elapsed < Duration::from_millis(1) {
-            Duration::from_millis(1) - elapsed
-        } else {
-            Duration::from_micros(1)
-        };
-        self.process_udp(timeout);
-
+        if elapsed < CYCLE_MS {
+            std::thread::sleep(CYCLE_MS - elapsed);
+        }
         Some(())
     }
 
@@ -231,11 +233,8 @@ impl Worker {
         }
     }
 
-    fn process_udp(&mut self, timeout: Duration) {
-        log::trace!("Processing udp with timeout: {:?}", timeout);
-        self.udp_socket
-            .set_read_timeout(Some(timeout))
-            .expect("Should set a timeout");
+    fn process_udp(&mut self) {
+        log::trace!("Processing udp");
         while let Ok((size, remote)) = self.udp_socket.recv_from(&mut self.udp_buffer) {
             let now = Instant::now();
             log::trace!("Received udp packet from {:?}, size: {}", remote, size);
