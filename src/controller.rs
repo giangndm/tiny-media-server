@@ -27,14 +27,11 @@ impl Controller {
         let mut joins = Vec::new();
         for _ in 0..workers {
             let (sender, receiver) = crossbeam::channel::bounded(100);
-            let mut worker = Worker::new(
-                ip_addr,
-                worker_send.clone(),
-                receiver,
-                bus.clone(),
-                bus.lock().add_rx(),
-            );
+            let worker_send = worker_send.clone();
+            let bus = bus.clone();
             let thread = std::thread::spawn(move || {
+                let bus_rx = bus.lock().add_rx();
+                let mut worker = Worker::new(ip_addr, worker_send, receiver, bus, bus_rx);
                 while let Some(_) = worker.process_cycle() {
                     // Do nothing
                 }

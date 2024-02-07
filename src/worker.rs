@@ -14,11 +14,25 @@ use crossbeam::channel::{Receiver, Sender};
 
 const CYCLE_MS: Duration = Duration::from_millis(1);
 
-type UdpSocket = UdpSocket2;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "netbsd",
+))]
+type UdpSocket = net::socket2_mmsg::UdpSocket2Mmsg<48>;
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "netbsd",
+)))]
+type UdpSocket = net::socket2::UdpSocket2;
 
 use crate::{
     io::{HttpResponse, IoAction, IoEvent},
-    net::{socket2::UdpSocket2, UdpSocketGeneric},
+    net::{self, UdpSocketGeneric},
     tasks::{ComposeTask, TrackMedia, WebrtcTask, WebrtcTaskInput, WebrtcTaskOutput},
 };
 
@@ -77,7 +91,7 @@ impl Worker {
     ) -> Worker {
         Worker {
             task_id_seed: 0,
-            udp_socket: UdpSocket2::new(ip_addr),
+            udp_socket: UdpSocket::new(SocketAddr::new(ip_addr, 0)),
             udp_buffer: [0; 1500],
             ext_send,
             ext_recv,
@@ -135,7 +149,7 @@ impl Worker {
                             Instant::now(),
                             task_id,
                             &mut task_container,
-                            &self.udp_socket,
+                            &mut self.udp_socket,
                             &self.ext_send,
                             &self.bus_send,
                             &mut self.bus_channels,
@@ -161,7 +175,7 @@ impl Worker {
                             Instant::now(),
                             task_id,
                             &mut task_container,
-                            &self.udp_socket,
+                            &mut self.udp_socket,
                             &self.ext_send,
                             &self.bus_send,
                             &mut self.bus_channels,
@@ -269,7 +283,7 @@ impl Worker {
                     now,
                     task_id,
                     task,
-                    &self.udp_socket,
+                    &mut self.udp_socket,
                     &self.ext_send,
                     &self.bus_send,
                     &mut self.bus_channels,
@@ -293,7 +307,7 @@ impl Worker {
                 now,
                 *task_id,
                 task,
-                &self.udp_socket,
+                &mut self.udp_socket,
                 &self.ext_send,
                 &self.bus_send,
                 &mut self.bus_channels,
@@ -306,7 +320,7 @@ impl Worker {
         now: Instant,
         task_id: usize,
         task: &mut TaskContainer,
-        udp_socket: &UdpSocket,
+        udp_socket: &mut UdpSocket,
         ext_send: &Sender<IoAction>,
         bus_send: &Arc<Mutex<Bus<BusEvent>>>,
         bus_channels: &mut HashMap<u64, BusChannelContainer>,

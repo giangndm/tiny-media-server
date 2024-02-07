@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 
 use socket2::{Domain, Socket, Type};
 
@@ -10,11 +10,14 @@ pub struct UdpSocket2 {
 }
 
 impl UdpSocket2 {
-    pub fn new(ip_addr: IpAddr) -> UdpSocket2 {
+    pub fn new<T: ToSocketAddrs>(ip_addr: T) -> UdpSocket2 {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).expect("Should create a socket");
-        socket
-            .bind(&SocketAddr::new(ip_addr, 0).into())
-            .expect("Should bind to a udp port");
+        let addrs = ip_addr.to_socket_addrs().unwrap();
+        for addr in addrs {
+            socket
+                .bind(&addr.into())
+                .expect("Should bind to a udp port");
+        }
         socket
             .set_send_buffer_size(1024 * 1024)
             .expect("Should set send buffer size");
@@ -38,15 +41,15 @@ impl UdpSocketGeneric for UdpSocket2 {
         self.local_addr
     }
 
-    fn add_send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize, std::io::Error> {
+    fn add_send_to(&mut self, buf: &[u8], addr: SocketAddr) -> Result<usize, std::io::Error> {
         self.socket.send_to(buf, addr)
     }
 
-    fn commit_send_to(&self) -> Result<(), std::io::Error> {
+    fn commit_send_to(&mut self) -> Result<(), std::io::Error> {
         Ok(())
     }
 
-    fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
+    fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
         self.socket.recv_from(buf)
     }
 }
