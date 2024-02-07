@@ -9,11 +9,10 @@ window.start = async () => {
 	pc.addTransceiver("audio", { direction: 'recvonly' });
 	pc.addTransceiver("video", { direction: 'recvonly' });
 
-	pc.ontrack = (event) =>
-	{
-		console.log(event)
-		if (event.track.kind == "video")
-			document.querySelector("video").srcObject = event.streams[0];
+	let stream = new MediaStream();
+	document.querySelector("video").srcObject = stream;
+	pc.ontrack = (event) => {
+		stream.addTrack(event.track);
 	}
 
 	//Create whep client
