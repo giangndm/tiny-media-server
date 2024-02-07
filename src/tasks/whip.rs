@@ -99,7 +99,7 @@ impl WebrtcTask for WhipServerTask {
                 if let Err(e) = self.rtc.handle_input(Input::Timeout(now)) {
                     log::error!("Error handling timeout: {}", e);
                 }
-                log::debug!("clear timeout after handled");
+                log::trace!("clear timeout after handled");
                 self.timeout = None;
                 return true;
             }
@@ -119,7 +119,7 @@ impl WebrtcTask for WhipServerTask {
                 )) {
                     log::error!("Error handling udp: {}", e);
                 }
-                log::debug!("clear timeout with udp");
+                log::trace!("clear timeout with udp");
                 self.timeout = None;
                 true
             }
@@ -157,7 +157,7 @@ impl WebrtcTask for WhipServerTask {
         match self.rtc.poll_output().ok()? {
             Output::Timeout(timeout) => {
                 self.timeout = Some(timeout);
-                log::debug!("set timeout after {:?}", timeout - now);
+                log::trace!("set timeout after {:?}", timeout - now);
                 None
             }
             Output::Transmit(send) => Some(

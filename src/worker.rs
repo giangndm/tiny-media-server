@@ -1,19 +1,23 @@
+use bus::{Bus, BusReader};
 use faster_stun::attribute::*;
 use faster_stun::*;
+use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr, UdpSocket},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use str0m::{change::DtlsCert, media::KeyframeRequestKind};
 
-use crossbeam::channel::{Receiver, Sender};
+use flume::{Receiver, Sender};
 
 use crate::{
     io::{HttpResponse, IoAction, IoEvent},
     tasks::{ComposeTask, TrackMedia, WebrtcTask, WebrtcTaskInput, WebrtcTaskOutput},
 };
 
+#[derive(Clone, Debug)]
 pub enum BusEvent {
     TrackMedia(TrackMedia),
     TrackKeyframeRequest(u64, KeyframeRequestKind),
@@ -49,8 +53,8 @@ pub struct Worker {
     udp_buffer: [u8; 1500],
     ext_send: Sender<IoAction>,
     ext_recv: Receiver<IoEvent<'static>>,
-    bus_send: Sender<BusEvent>,
-    bus_recv: Receiver<BusEvent>,
+    bus_send: Arc<Mutex<Bus<BusEvent>>>,
+    bus_recv: BusReader<BusEvent>,
     bus_channels: HashMap<u64, BusChannelContainer>,
     tasks: HashMap<usize, TaskContainer>,
     task_remotes: HashMap<SocketAddr, usize>,
@@ -64,8 +68,8 @@ impl Worker {
         ip_addr: IpAddr,
         ext_send: Sender<IoAction>,
         ext_recv: Receiver<IoEvent<'static>>,
-        bus_send: Sender<BusEvent>,
-        bus_recv: Receiver<BusEvent>,
+        bus_send: Arc<Mutex<Bus<BusEvent>>>,
+        bus_recv: BusReader<BusEvent>,
     ) -> Worker {
         let socket = std::net::UdpSocket::bind(SocketAddr::new(ip_addr, 0))
             .expect("Should bind to a udp port");
@@ -187,6 +191,7 @@ impl Worker {
 
     fn process_bus_recv(&mut self) {
         while let Ok(event) = self.bus_recv.try_recv() {
+            log::debug!("Received track media from bus");
             match event {
                 BusEvent::TrackMedia(media) => {
                     if let Some(channel) = self.bus_channels.get(&media.track_id) {
@@ -309,7 +314,7 @@ impl Worker {
         task: &mut TaskContainer,
         udp_socket: &UdpSocket,
         ext_send: &Sender<IoAction>,
-        bus_send: &Sender<BusEvent>,
+        bus_send: &Arc<Mutex<Bus<BusEvent>>>,
         bus_channels: &mut HashMap<u64, BusChannelContainer>,
         ended_tasks: &mut Vec<usize>,
     ) {
@@ -326,16 +331,13 @@ impl Worker {
                     }
                 }
                 WebrtcTaskOutput::TrackMedia(media) => {
-                    if let Err(e) = bus_send.try_send(BusEvent::TrackMedia(media)) {
-                        log::error!("Failed to send track media to bus: {}", e.to_string());
-                    }
+                    bus_send.lock().broadcast(BusEvent::TrackMedia(media));
+                    log::debug!("Sent track media to bus");
                 }
                 WebrtcTaskOutput::RequestKeyframeTrack { track_id, kind } => {
-                    if let Err(e) =
-                        bus_send.try_send(BusEvent::TrackKeyframeRequest(track_id, kind))
-                    {
-                        log::error!("Failed to send keyframe request to bus: {}", e.to_string());
-                    }
+                    bus_send
+                        .lock()
+                        .broadcast(BusEvent::TrackKeyframeRequest(track_id, kind));
                 }
                 WebrtcTaskOutput::TaskEnded => {
                     log::info!("Task {task_id} ended");

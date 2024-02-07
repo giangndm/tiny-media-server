@@ -96,7 +96,7 @@ impl WebrtcTask for WhepServerTask {
                 if let Err(e) = self.rtc.handle_input(Input::Timeout(now)) {
                     log::error!("Error handling timeout: {}", e);
                 }
-                log::debug!("clear timeout after handled timeout");
+                log::trace!("clear timeout after handled timeout");
                 self.timeout = None;
                 return true;
             }
@@ -116,7 +116,7 @@ impl WebrtcTask for WhepServerTask {
                 )) {
                     log::error!("Error handling udp: {}", e);
                 }
-                log::debug!("clear timeout with udp");
+                log::trace!("clear timeout with udp");
                 self.timeout = None;
                 true
             }
@@ -130,6 +130,13 @@ impl WebrtcTask for WhepServerTask {
 
                 if let Some(mid) = mid {
                     if let Some(stream) = self.rtc.direct_api().stream_tx_by_mid(mid, None) {
+                        log::debug!(
+                            "Write rtp for mid: {:?} {} {} {}",
+                            mid,
+                            media.seq_no,
+                            media.header.timestamp,
+                            media.payload.len()
+                        );
                         if let Err(e) = stream.write_rtp(
                             media.header.payload_type,
                             media.seq_no,
@@ -142,7 +149,7 @@ impl WebrtcTask for WhepServerTask {
                         ) {
                             log::error!("Error writing rtp: {}", e);
                         }
-                        log::debug!("clear timeout with media");
+                        log::trace!("clear timeout with media");
                         self.timeout = None;
                     }
                 } else {
@@ -169,7 +176,7 @@ impl WebrtcTask for WhepServerTask {
         match self.rtc.poll_output().ok()? {
             Output::Timeout(timeout) => {
                 self.timeout = Some(timeout);
-                log::debug!("set timeout after {:?}", timeout - now);
+                log::trace!("set timeout after {:?}", timeout - now);
                 None
             }
             Output::Transmit(send) => Some(

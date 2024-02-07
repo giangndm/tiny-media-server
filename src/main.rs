@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::{collections::HashMap, time::Duration};
 
-use tiny_http::{Header, Response, Server};
+use tiny_http::{Header, Method, Response, Server};
 use tiny_media_server::io::IoAction;
 use tiny_media_server::{
     controller::Controller,
@@ -65,6 +65,28 @@ fn main() {
                 continue;
             }
 
+            if request.method().eq(&Method::Options) {
+                let mut response = Response::from_string("OK");
+                //setting CORS
+                response
+                    .add_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap());
+                response.add_header(
+                    Header::from_bytes(
+                        "Access-Control-Allow-Methods",
+                        "GET, POST, PATCH, DELETE, OPTIONS",
+                    )
+                    .unwrap(),
+                );
+                response
+                    .add_header(Header::from_bytes("Access-Control-Allow-Headers", "*").unwrap());
+                response.add_header(
+                    Header::from_bytes("Access-Control-Allow-Credentials", "true").unwrap(),
+                );
+
+                request.respond(response).expect("Should respond options.");
+                continue;
+            }
+
             log::info!(
                 "received request_id {} method: {}, url: {}",
                 req_id,
@@ -102,6 +124,16 @@ fn main() {
                         response
                             .add_header(Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap());
                     }
+                    response.add_header(
+                        Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
+                    );
+                    response.add_header(
+                        Header::from_bytes(
+                            "Access-Control-Allow-Methods",
+                            "GET, POST, PATCH, DELETE, OPTIONS",
+                        )
+                        .unwrap(),
+                    );
                     req.respond(response).unwrap();
                 }
                 _ => panic!("Should not receive this event."),
