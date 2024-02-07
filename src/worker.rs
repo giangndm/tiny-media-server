@@ -2,10 +2,9 @@ use bus::{Bus, BusReader};
 use faster_stun::attribute::*;
 use faster_stun::*;
 use parking_lot::Mutex;
-use socket2::{Domain, Socket, Type};
 use std::{
     collections::HashMap,
-    net::{IpAddr, SocketAddr, UdpSocket},
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -15,8 +14,11 @@ use crossbeam::channel::{Receiver, Sender};
 
 const CYCLE_MS: Duration = Duration::from_millis(1);
 
+type UdpSocket = UdpSocket2;
+
 use crate::{
     io::{HttpResponse, IoAction, IoEvent},
+    net::{socket2::UdpSocket2, UdpSocketGeneric},
     tasks::{ComposeTask, TrackMedia, WebrtcTask, WebrtcTaskInput, WebrtcTaskOutput},
 };
 
@@ -51,7 +53,6 @@ impl From<ComposeTask> for TaskContainer {
 
 pub struct Worker {
     task_id_seed: usize,
-    udp_addr: SocketAddr,
     udp_socket: UdpSocket,
     udp_buffer: [u8; 1500],
     ext_send: Sender<IoAction>,
@@ -74,25 +75,9 @@ impl Worker {
         bus_send: Arc<Mutex<Bus<BusEvent>>>,
         bus_recv: BusReader<BusEvent>,
     ) -> Worker {
-        let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).expect("Should create a socket");
-        socket
-            .bind(&SocketAddr::new(ip_addr, 0).into())
-            .expect("Should bind to a udp port");
-        socket
-            .set_send_buffer_size(1024 * 1024)
-            .expect("Should set send buffer size");
-        socket
-            .set_recv_buffer_size(1024 * 1024)
-            .expect("Should set recv buffer size");
-        socket
-            .set_nonblocking(true)
-            .expect("Should set nonblocking");
-        let socket: UdpSocket = socket.into();
-
         Worker {
             task_id_seed: 0,
-            udp_addr: socket.local_addr().expect("should have a local address"),
-            udp_socket: socket,
+            udp_socket: UdpSocket2::new(ip_addr),
             udp_buffer: [0; 1500],
             ext_send,
             ext_recv,
@@ -140,7 +125,7 @@ impl Worker {
                         let task = ComposeTask::Whip(crate::tasks::whip::WhipServerTask::new(
                             self.dtls_cert.clone(),
                             req,
-                            vec![self.udp_addr],
+                            vec![self.udp_socket.local_addr()],
                         ));
                         log::info!("Created whip task id: {}, ufrag: {}", task_id, task.ufrag());
 
@@ -166,7 +151,7 @@ impl Worker {
                         let task = ComposeTask::Whep(crate::tasks::whep::WhepServerTask::new(
                             self.dtls_cert.clone(),
                             req,
-                            vec![self.udp_addr],
+                            vec![self.udp_socket.local_addr()],
                         ));
                         log::info!("Created whep task id: {}, ufrag: {}", task_id, task.ufrag());
 
@@ -273,7 +258,7 @@ impl Worker {
                     now,
                     IoEvent::UdpSocketRecv {
                         from: remote,
-                        to: self.udp_addr,
+                        to: self.udp_socket.local_addr(),
                         buf: &self.udp_buffer[..size],
                     }
                     .into(),
@@ -330,7 +315,7 @@ impl Worker {
         while let Some(action) = task.task.pop_action(now) {
             match action {
                 WebrtcTaskOutput::Io(IoAction::UdpSocketSend { from: _, to, buf }) => {
-                    if let Err(e) = udp_socket.send_to(&buf, to) {
+                    if let Err(e) = udp_socket.add_send_to(&buf, to) {
                         log::error!("Failed to send udp packet to {to}: {e}");
                     }
                 }
@@ -377,6 +362,9 @@ impl Worker {
                     task.sub_channels.push(track_id);
                 }
             }
+        }
+        if let Err(e) = udp_socket.commit_send_to() {
+            log::error!("Failed to commit send to: {e}");
         }
     }
 
