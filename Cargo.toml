@@ -12,6 +12,6 @@ tiny_http = "0.12.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "std"] }
 str0m = { git = "https://github.com/algesten/str0m.git", branch = "main" }
 faster-stun = "1.0.2"
-flume = "0.11.0"
 bus = "2.4.1"
 parking_lot = "0.12.1"
+crossbeam = "0.8.4"

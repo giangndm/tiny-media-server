@@ -1,7 +1,7 @@
 use std::{net::IpAddr, sync::Arc, thread::JoinHandle};
 
 use bus::Bus;
-use flume::{Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender};
 use parking_lot::Mutex;
 
 use crate::{
@@ -22,11 +22,11 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(workers: usize, ip_addr: IpAddr) -> Controller {
-        let bus = Arc::new(Mutex::new(Bus::new(100)));
-        let (worker_send, worker_recv) = flume::bounded(100);
+        let bus = Arc::new(Mutex::new(Bus::new(1000)));
+        let (worker_send, worker_recv) = crossbeam::channel::bounded(100);
         let mut joins = Vec::new();
         for _ in 0..workers {
-            let (sender, receiver) = flume::bounded(100);
+            let (sender, receiver) = crossbeam::channel::bounded(100);
             let mut worker = Worker::new(
                 ip_addr,
                 worker_send.clone(),

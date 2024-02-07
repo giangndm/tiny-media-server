@@ -10,7 +10,7 @@ use std::{
 };
 use str0m::{change::DtlsCert, media::KeyframeRequestKind};
 
-use flume::{Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
     io::{HttpResponse, IoAction, IoEvent},
