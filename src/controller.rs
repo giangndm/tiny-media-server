@@ -1,4 +1,4 @@
-use std::thread::JoinHandle;
+use std::{net::IpAddr, thread::JoinHandle};
 
 use crossbeam::channel::{Receiver, Sender};
 
@@ -19,13 +19,14 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(workers: usize) -> Controller {
+    pub fn new(workers: usize, ip_addr: IpAddr) -> Controller {
         let (bus_send, bus_recv) = crossbeam::channel::bounded(100);
         let (worker_send, worker_recv) = crossbeam::channel::bounded(100);
         let mut joins = Vec::new();
         for _ in 0..workers {
             let (sender, receiver) = crossbeam::channel::bounded(100);
             let mut worker = Worker::new(
+                ip_addr,
                 worker_send.clone(),
                 receiver,
                 bus_send.clone(),

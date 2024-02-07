@@ -2,7 +2,7 @@ use faster_stun::attribute::*;
 use faster_stun::*;
 use std::{
     collections::HashMap,
-    net::{SocketAddr, UdpSocket},
+    net::{IpAddr, SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
 use str0m::{change::DtlsCert, media::KeyframeRequestKind};
@@ -61,12 +61,14 @@ pub struct Worker {
 
 impl Worker {
     pub fn new(
+        ip_addr: IpAddr,
         ext_send: Sender<IoAction>,
         ext_recv: Receiver<IoEvent<'static>>,
         bus_send: Sender<BusEvent>,
         bus_recv: Receiver<BusEvent>,
     ) -> Worker {
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("Should bind to a udp port");
+        let socket = std::net::UdpSocket::bind(SocketAddr::new(ip_addr, 0))
+            .expect("Should bind to a udp port");
 
         Worker {
             task_id_seed: 0,

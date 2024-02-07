@@ -1,19 +1,39 @@
+use clap::Parser;
 use std::fs::File;
 use std::io::Read;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::{collections::HashMap, time::Duration};
 
 use tiny_http::{Header, Response, Server};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter};
 use tiny_media_server::io::IoAction;
 use tiny_media_server::{
     controller::Controller,
     io::{HttpRequest, IoEvent},
 };
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{fmt, EnvFilter};
+
+/// Media Server
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Http port
+    #[arg(env, long, default_value = "0.0.0.0:8000")]
+    http_addr: SocketAddr,
+
+    /// Number of workers
+    #[arg(env, long, default_value_t = 4)]
+    workers: usize,
+
+    /// Listen address for media data
+    #[arg(env, long, default_value = "127.0.0.1")]
+    listen_addr: IpAddr,
+}
 
 fn main() {
+    let args: Args = Args::parse();
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");
     }
@@ -24,9 +44,9 @@ fn main() {
 
     let mut req_id = 0;
     let mut reqs = HashMap::new();
-    let server = Server::http("0.0.0.0:8000").unwrap();
-    log::info!("server started at port 8000");
-    let mut controller = Controller::new(1);
+    let server = Server::http(args.http_addr).unwrap();
+    log::info!("server started at port {}", args.http_addr);
+    let mut controller = Controller::new(args.workers, args.listen_addr);
 
     loop {
         if let Ok(Some(mut request)) = server.recv_timeout(Duration::from_millis(100)) {
