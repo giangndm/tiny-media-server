@@ -7,8 +7,8 @@ use tiny_http::{Header, Response, Server};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
-use whip_whep_server::io::IoAction;
-use whip_whep_server::{
+use tiny_media_server::io::IoAction;
+use tiny_media_server::{
     controller::Controller,
     io::{HttpRequest, IoEvent},
 };
