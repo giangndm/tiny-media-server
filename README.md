@@ -33,13 +33,15 @@ Default build release: `cargo build --release`
 
 | Cores | Viewers | CPU % | Memory | Network(whep benchmark report) | Network OS report |
 | ----- | ------- | ----- | ------ | ------------------------------ | ----------------- |
-| 4     | 500     | 104%  | 7.1%   | 950 Mbps                       | TODO              |
-| 4     | 1000    | 210%  | 14.2%  | 1.92 Gbps                      | TODO              |
+| 4     | 500     | 104%  | 7.1%   | 950 Mbps                       | 950 Mbps          |
+| 4     | 1000    | 210%  | 14.2%  | 1.92 Gbps                      | 1.92 Gbps         |
 
 Compared with Livekit:
 
 | Cores | Viewers | CPU % | Memory | Network(cli report) | Network OS report |
 | ----- | ------- | ----- | ------ | ------------------- | ----------------- |
+| 4     | 500     | 100%  | 10%   | 522 Mbps                       | 800Mbps              |
+| 4     | 1000    | 190%  | 18.6%  | 891 Mbps                      | 1.6 Gbps              |
 
 ### AWS c6a.xlarge 4cores 8GB
 
