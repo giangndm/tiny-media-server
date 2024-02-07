@@ -22,13 +22,13 @@ Everything is SAN-I/O.
 
 ## Benchmarks
 
-Based: aws c6a.large 4cores 8GB
+Based: aws c6a.xlarge 4cores 8GB
 
 Update1: `sendmmsg` not improving much.
 
 Default build release: `cargo build --release`
 
-| Cores | Viewers | CPU % | Memory | Network(whep benchamrk report) | Network OS report |
+| Cores | Viewers | CPU % | Memory | Network(whep benchmark report) | Network OS report |
 | ----- | ------- | ----- | ------ | ------------------------------ | ----------------- |
 | 4     | 100     | 24%   | 1.8%   | 160 Mbps                       | TODO              |
 | 4     | 200     | 66%   | 3.0%   | 388 Mbps                       | TODO              |
