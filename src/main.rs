@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::fs::File;
 use std::io::Read;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::Path;
 use std::{collections::HashMap, time::Duration};
 
@@ -33,6 +33,12 @@ struct Args {
 }
 
 fn main() {
+    let udp_server = UdpSocket::bind("127.0.0.1:40000").expect("");
+    let mut buf = [0; 1500];
+    while let Ok((size, addr)) = udp_server.recv_from(&mut buf) {
+        println!("Received {} bytes from {}", size, addr);
+    }
+
     let args: Args = Args::parse();
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");

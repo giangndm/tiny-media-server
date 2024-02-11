@@ -14,12 +14,10 @@ use crossbeam::channel::{Receiver, Sender};
 
 const CYCLE_MS: Duration = Duration::from_millis(1);
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "freebsd",
-    target_os = "netbsd",
-))]
+#[cfg(any(target_os = "linux", target_os = "android",))]
+type UdpSocket = net::socket2_io_uring::UdpSocket2IoUring<2048>;
+
+#[cfg(any(target_os = "freebsd", target_os = "netbsd",))]
 type UdpSocket = net::socket2_mmsg::UdpSocket2Mmsg<48>;
 
 #[cfg(not(any(
@@ -68,7 +66,7 @@ impl From<ComposeTask> for TaskContainer {
 pub struct Worker {
     task_id_seed: usize,
     udp_socket: UdpSocket,
-    udp_buffer: [u8; 1500],
+    udp_socket_local_addr: SocketAddr,
     ext_send: Sender<IoAction>,
     ext_recv: Receiver<IoEvent<'static>>,
     bus_send: Arc<Mutex<Bus<BusEvent>>>,
@@ -89,10 +87,12 @@ impl Worker {
         bus_send: Arc<Mutex<Bus<BusEvent>>>,
         bus_recv: BusReader<BusEvent>,
     ) -> Worker {
+        let udp_socket = UdpSocket::new(SocketAddr::new(ip_addr, 0));
+
         Worker {
             task_id_seed: 0,
-            udp_socket: UdpSocket::new(SocketAddr::new(ip_addr, 0)),
-            udp_buffer: [0; 1500],
+            udp_socket_local_addr: udp_socket.local_addr(),
+            udp_socket,
             ext_send,
             ext_recv,
             bus_send,
@@ -234,9 +234,9 @@ impl Worker {
 
     fn process_udp(&mut self) {
         log::trace!("Processing udp");
-        while let Ok((size, remote)) = self.udp_socket.recv_from(&mut self.udp_buffer) {
+        while let Ok((buf, remote)) = self.udp_socket.recv_from() {
             let now = Instant::now();
-            log::trace!("Received udp packet from {:?}, size: {}", remote, size);
+            log::trace!("Received udp packet from {:?}, size: {}", remote, buf.len());
             let slot = if let Some(task_id) = self.task_remotes.get(&remote) {
                 if let Some(task) = self.tasks.get_mut(task_id) {
                     Some((*task_id, task))
@@ -244,7 +244,7 @@ impl Worker {
                     None
                 }
             } else {
-                if let Some(stun_username) = Self::get_stun_username(&self.udp_buffer[..size]) {
+                if let Some(stun_username) = Self::get_stun_username(buf) {
                     log::warn!(
                         "Received a stun packet from an unknown remote: {:?}, username {}",
                         remote,
@@ -272,8 +272,8 @@ impl Worker {
                     now,
                     IoEvent::UdpSocketRecv {
                         from: remote,
-                        to: self.udp_socket.local_addr(),
-                        buf: &self.udp_buffer[..size],
+                        to: self.udp_socket_local_addr,
+                        buf,
                     }
                     .into(),
                 );

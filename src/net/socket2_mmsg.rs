@@ -17,6 +17,7 @@ pub struct UdpSocket2Mmsg<const QUEUE: usize> {
     bufs: [([u8; 1500], usize); QUEUE],
     addrs: [Option<SockaddrStorage>; QUEUE],
     queue_len: usize,
+    recv_buf: [u8; 1500],
 }
 
 impl<const QUEUE: usize> UdpSocket2Mmsg<QUEUE> {
@@ -47,6 +48,7 @@ impl<const QUEUE: usize> UdpSocket2Mmsg<QUEUE> {
             bufs: [([0; 1500], 0); QUEUE],
             addrs: [None; QUEUE],
             queue_len: 0,
+            recv_buf: [0; 1500],
         }
     }
 }
@@ -91,8 +93,9 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2Mmsg<QUEUE> {
         Ok(())
     }
 
-    fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
-        self.socket.recv_from(buf)
+    fn recv_from(&mut self) -> Result<(&[u8], SocketAddr), std::io::Error> {
+        let (size, remote) = self.socket.recv_from(&mut self.recv_buf)?;
+        Ok((&self.recv_buf[0..size], remote))
     }
 
     fn finish_read_from(&mut self) -> Result<(), std::io::Error> {
@@ -113,18 +116,18 @@ mod tests {
         let mut socket1 = UdpSocket2Mmsg::<2>::new("127.0.0.1:0");
         let mut socket2 = UdpSocket2Mmsg::<2>::new("127.0.0.1:0");
 
+        let buf = vec![1, 2, 3, 4];
+
         socket1
-            .add_send_to(&[1, 2, 3, 4], socket2.local_addr())
+            .add_send_to(&buf, socket2.local_addr())
             .expect("Should ok");
         socket1.commit_send_to().expect("Should ok");
         std::thread::sleep(Duration::from_millis(100));
 
-        let mut buf = [0; 1500];
         assert_eq!(
-            socket2.recv_from(&mut buf).unwrap(),
-            (4, socket1.local_addr())
+            socket2.recv_from().unwrap(),
+            (buf.as_slice(), socket1.local_addr())
         );
-        assert_eq!(&buf[0..4], &[1, 2, 3, 4]);
     }
 
     #[test]
@@ -142,9 +145,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
 
         for i in 1..=3 {
-            let mut buf = [0; 1500];
-            assert_eq!(socket2.recv_from(&mut buf).unwrap(), (1, addr1));
-            assert_eq!(&buf[0..1], &[i]);
+            assert_eq!(socket2.recv_from().unwrap(), (vec![i].as_slice(), addr1));
         }
     }
 }

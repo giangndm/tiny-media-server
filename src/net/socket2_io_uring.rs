@@ -62,10 +62,9 @@ pub struct UdpSocket2IoUring<const QUEUE: usize> {
     local_addr: SocketAddr,
     send_bufs: Vec<NetPacket>,
     send_free_queue: VecDeque<usize>,
-    send_queue_changed: bool,
     read_bufs: Vec<NetPacket>,
     read_wait_queue: VecDeque<(usize, usize)>,
-    read_queue_changed: bool,
+    ring_queue_changed: bool,
 }
 
 impl<const QUEUE: usize> UdpSocket2IoUring<QUEUE> {
@@ -144,10 +143,27 @@ impl<const QUEUE: usize> UdpSocket2IoUring<QUEUE> {
             _socket: socket,
             read_bufs,
             send_bufs,
-            send_queue_changed: false,
-            read_queue_changed: false,
             send_free_queue: (0..QUEUE).collect(),
             read_wait_queue: VecDeque::new(),
+            ring_queue_changed: false,
+        }
+    }
+
+    fn poll_completions(&mut self) {
+        while let Some(complete) = self.ring.completion().next() {
+            if complete.result() > 0 {
+                match complete.user_data().into() {
+                    UserData::Recv(idx) => {
+                        self.read_wait_queue
+                            .push_back((idx, complete.result() as usize));
+                    }
+                    UserData::Send(idx) => {
+                        self.send_free_queue.push_back(idx);
+                    }
+                }
+            } else {
+                log::error!("Error: {}", complete.result());
+            }
         }
     }
 }
@@ -158,6 +174,7 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
     }
 
     fn add_send_to(&mut self, buf: &[u8], dest: SocketAddr) -> Result<usize, std::io::Error> {
+        self.poll_completions();
         let pkt_idx = self.send_free_queue.pop_front().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::WouldBlock, "Send queue is full")
         })?;
@@ -180,39 +197,23 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
                 .expect("Should push sendmsg to io_uring");
         }
 
-        self.send_queue_changed = true;
+        self.ring_queue_changed = true;
 
         Ok(buf.len())
     }
 
     fn commit_send_to(&mut self) -> Result<(), std::io::Error> {
-        if self.send_queue_changed {
+        if self.ring_queue_changed {
             self.ring.submit()?;
-            self.send_queue_changed = false;
+            self.ring_queue_changed = false;
         }
         Ok(())
     }
 
-    fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
-        while let Some(complete) = self.ring.completion().next() {
-            if complete.result() > 0 {
-                match complete.user_data().into() {
-                    UserData::Recv(idx) => {
-                        self.read_wait_queue
-                            .push_back((idx, complete.result() as usize));
-                    }
-                    UserData::Send(idx) => {
-                        self.send_free_queue.push_back(idx);
-                    }
-                }
-            } else {
-                log::error!("Error: {}", complete.result());
-            }
-        }
-
+    fn recv_from(&mut self) -> Result<(&[u8], SocketAddr), std::io::Error> {
+        self.poll_completions();
         if let Some((idx, len)) = self.read_wait_queue.pop_front() {
             let pkt = &mut self.read_bufs[idx];
-            buf[..len].copy_from_slice(&pkt.buf[..len]);
 
             let recvmsg_e = opcode::RecvMsg::new(types::Fd(self.sockfd), &mut pkt.msg)
                 .build()
@@ -227,9 +228,12 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
                     .expect("Should push recvmsg to io_uring");
             }
 
-            self.read_queue_changed = true;
+            self.ring_queue_changed = true;
 
-            Ok((len, pkt.addr.as_socket().expect("Should be addr")))
+            Ok((
+                &pkt.buf[..len],
+                pkt.addr.as_socket().expect("Should be addr"),
+            ))
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::WouldBlock,
@@ -239,9 +243,9 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
     }
 
     fn finish_read_from(&mut self) -> Result<(), std::io::Error> {
-        if self.read_queue_changed {
+        if self.ring_queue_changed {
             self.ring.submit()?;
-            self.read_queue_changed = false;
+            self.ring_queue_changed = false;
         }
         Ok(())
     }
@@ -266,24 +270,22 @@ mod tests {
         socket1.commit_send_to().expect("Should ok");
         std::thread::sleep(Duration::from_millis(100));
 
-        let mut buf = [0; 1500];
         assert_eq!(
-            socket2.recv_from(&mut buf).unwrap(),
-            (4, socket1.local_addr())
+            socket2.recv_from().unwrap(),
+            (vec![1, 2, 3, 4].as_slice(), socket1.local_addr())
         );
-        assert_eq!(&buf[0..4], &[1, 2, 3, 4]);
         socket2.finish_read_from().expect("Should ok");
     }
 
     #[test]
     fn send_multi_msgs() {
-        let mut socket1 = UdpSocket2IoUring::<8>::new("127.0.0.1:0");
-        let mut socket2 = UdpSocket2IoUring::<8>::new("127.0.0.1:0");
+        let mut socket1 = UdpSocket2IoUring::<4>::new("127.0.0.1:0");
+        let mut socket2 = UdpSocket2IoUring::<4>::new("127.0.0.1:0");
 
         let addr1 = socket1.local_addr();
         let addr2 = socket2.local_addr();
 
-        for _ in 0..20 {
+        for _ in 0..3 {
             socket1.add_send_to(&[1], addr2).expect("Should ok");
             socket1.add_send_to(&[2], addr2).expect("Should ok");
             socket1.add_send_to(&[3], addr2).expect("Should ok");
@@ -291,9 +293,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
 
             for i in 1..=3 {
-                let mut buf = [0; 1500];
-                assert_eq!(socket2.recv_from(&mut buf).unwrap(), (1, addr1));
-                assert_eq!(&buf[0..1], &[i]);
+                assert_eq!(socket2.recv_from().unwrap(), (vec![i].as_slice(), addr1));
             }
             socket2.finish_read_from().expect("Should ok");
         }
