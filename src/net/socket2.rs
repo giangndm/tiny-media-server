@@ -52,4 +52,8 @@ impl UdpSocketGeneric for UdpSocket2 {
     fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
         self.socket.recv_from(buf)
     }
+
+    fn finish_read_from(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
