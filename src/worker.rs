@@ -15,7 +15,7 @@ use crossbeam::channel::{Receiver, Sender};
 const CYCLE_MS: Duration = Duration::from_millis(1);
 
 #[cfg(any(target_os = "linux", target_os = "android",))]
-type UdpSocket = net::socket2_io_uring::UdpSocket2IoUring<2048>;
+type UdpSocket = net::socket2_io_uring::UdpSocket2IoUring<2048, 48>;
 
 #[cfg(any(target_os = "freebsd", target_os = "netbsd",))]
 type UdpSocket = net::socket2_mmsg::UdpSocket2Mmsg<48>;
