@@ -114,6 +114,12 @@ impl Worker {
         self.pop_tasks(Instant::now());
         self.pop_ended_tasks();
         self.process_udp();
+        if let Err(e) = self.udp_socket.commit_send_to() {
+            log::error!("Failed to commit send to: {e}");
+        }
+        if let Err(e) = self.udp_socket.finish_read_from() {
+            log::error!("Failed to finish read from: {e}");
+        }
         let elapsed = started.elapsed();
         if elapsed < CYCLE_MS {
             std::thread::sleep(CYCLE_MS - elapsed);
@@ -313,9 +319,6 @@ impl Worker {
                 &mut self.bus_channels,
                 &mut self.ended_tasks,
             );
-        }
-        if let Err(e) = self.udp_socket.commit_send_to() {
-            log::error!("Failed to commit send to: {e}");
         }
     }
 
