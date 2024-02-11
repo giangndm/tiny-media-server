@@ -1,5 +1,7 @@
 use std::{
-    collections::VecDeque, io::{IoSlice, IoSliceMut}, mem::MaybeUninit, net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket}, os::fd::AsRawFd
+    collections::VecDeque,
+    net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
+    os::fd::AsRawFd,
 };
 
 use io_uring::{opcode, squeue, types, IoUring};
@@ -9,17 +11,22 @@ use super::UdpSocketGeneric;
 
 #[derive(Debug, Clone)]
 struct NetPacket {
-    msg: MaybeUninit::<libc::msghdr>,
+    msg: libc::msghdr,
     buf: [u8; 1500],
     addr: socket2::SockAddr,
+    iovecs: [libc::iovec; 1],
 }
 
 impl Default for NetPacket {
     fn default() -> Self {
         NetPacket {
-            msg: MaybeUninit::uninit(),
+            msg: unsafe { std::mem::zeroed() },
             buf: [0; 1500],
             addr: SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+            iovecs: [libc::iovec {
+                iov_base: std::ptr::null_mut(),
+                iov_len: 0,
+            }],
         }
     }
 }
@@ -51,19 +58,20 @@ impl From<u64> for UserData {
 pub struct UdpSocket2IoUring<const QUEUE: usize> {
     ring: IoUring,
     sockfd: i32,
-    socket: Socket,
+    _socket: Socket,
     local_addr: SocketAddr,
     send_bufs: Vec<NetPacket>,
     send_free_queue: VecDeque<usize>,
     send_queue_changed: bool,
     read_bufs: Vec<NetPacket>,
-    read_wait_queue: VecDeque<usize>,
+    read_wait_queue: VecDeque<(usize, usize)>,
     read_queue_changed: bool,
 }
 
 impl<const QUEUE: usize> UdpSocket2IoUring<QUEUE> {
     pub fn new<T: ToSocketAddrs>(ip_addr: T) -> UdpSocket2IoUring<QUEUE> {
-        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).expect("Should create a socket");
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+            .expect("Should create a socket");
         let addrs = ip_addr.to_socket_addrs().unwrap();
         for addr in addrs {
             socket
@@ -86,37 +94,40 @@ impl<const QUEUE: usize> UdpSocket2IoUring<QUEUE> {
             read_bufs.push(NetPacket::default());
         }
 
-        //prepare write
+        // preapre write
         for i in 0..QUEUE {
             let pkt = &mut send_bufs[i];
-            unsafe {
-                let p = pkt.msg.as_mut_ptr();
-                (*p).msg_name = pkt.addr.as_ptr() as *const _ as *mut _;
-                (*p).msg_namelen = pkt.addr.len();
-                (*p).msg_iov =  IoSlice::new(&pkt.buf).as_ptr() as *mut _;
-                (*p).msg_iovlen = 1;
-            }
+
+            pkt.iovecs[0].iov_base = pkt.buf.as_mut_ptr() as *mut _;
+            pkt.iovecs[0].iov_len = pkt.buf.len();
+
+            pkt.msg.msg_name = pkt.addr.as_ptr() as *const _ as *mut _;
+            pkt.msg.msg_namelen = pkt.addr.len();
+            pkt.msg.msg_iov = &mut pkt.iovecs as *mut _;
+            pkt.msg.msg_iovlen = 1;
         }
 
-        //prepare read
+        // prepare read
         for i in 0..QUEUE {
             let pkt = &mut read_bufs[i];
-            unsafe {
-                let p = pkt.msg.as_mut_ptr();
-                (*p).msg_name = pkt.addr.as_ptr() as *const _ as *mut _;
-                (*p).msg_namelen = pkt.addr.len();
-                (*p).msg_iov = IoSliceMut::new(&mut pkt.buf).as_ptr() as *mut _;
-                (*p).msg_iovlen = 1;
-            }
 
-            let recvmsg_e = opcode::RecvMsg::new(types::Fd(sockfd), pkt.msg.as_mut_ptr()).build()
+            pkt.iovecs[0].iov_base = pkt.buf.as_mut_ptr() as *mut _;
+            pkt.iovecs[0].iov_len = pkt.buf.len();
+
+            pkt.msg.msg_name = pkt.addr.as_ptr() as *const _ as *mut _;
+            pkt.msg.msg_namelen = pkt.addr.len();
+            pkt.msg.msg_iov = &mut pkt.iovecs as *mut _;
+            pkt.msg.msg_iovlen = 1;
+
+            let recvmsg_e = opcode::RecvMsg::new(types::Fd(sockfd), &mut pkt.msg)
+                .build()
                 .user_data(UserData::Recv(i).into())
                 .flags(squeue::Flags::ASYNC)
                 .into();
 
             unsafe {
-                ring
-                    .submission().push(&recvmsg_e)
+                ring.submission()
+                    .push(&recvmsg_e)
                     .expect("Should push recvmsg to io_uring");
             }
         }
@@ -125,8 +136,12 @@ impl<const QUEUE: usize> UdpSocket2IoUring<QUEUE> {
         UdpSocket2IoUring {
             sockfd,
             ring,
-            local_addr: socket.local_addr().expect("Should get local addr").as_socket().expect("Should be addr"),
-            socket,
+            local_addr: socket
+                .local_addr()
+                .expect("Should get local addr")
+                .as_socket()
+                .expect("Should be addr"),
+            _socket: socket,
             read_bufs,
             send_bufs,
             send_queue_changed: false,
@@ -149,24 +164,24 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
         let pkt = &mut self.send_bufs[pkt_idx];
         pkt.addr = SockAddr::from(dest);
         pkt.buf[..buf.len()].copy_from_slice(buf);
-        let p = pkt.msg.as_mut_ptr();
-        unsafe {
-            (*(*p).msg_iov).iov_len = buf.len();
-        }
+        pkt.iovecs[0].iov_len = buf.len();
+        pkt.msg.msg_namelen = pkt.addr.len();
 
-        let sendmsg_e = opcode::SendMsg::new(types::Fd(self.sockfd), pkt.msg.as_mut_ptr()).build()
+        let sendmsg_e = opcode::SendMsg::new(types::Fd(self.sockfd), &pkt.msg)
+            .build()
             .user_data(UserData::Send(pkt_idx).into())
-            .flags(squeue::Flags::ASYNC)
+            .flags(squeue::Flags::IO_LINK)
             .into();
 
         unsafe {
             self.ring
-                .submission().push(&sendmsg_e)
+                .submission()
+                .push(&sendmsg_e)
                 .expect("Should push sendmsg to io_uring");
         }
 
         self.send_queue_changed = true;
-        
+
         Ok(buf.len())
     }
 
@@ -180,29 +195,35 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
 
     fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
         while let Some(complete) = self.ring.completion().next() {
-            match complete.user_data().into() {
-                UserData::Recv(idx) => {
-                    self.read_wait_queue.push_back(idx);
+            if complete.result() > 0 {
+                match complete.user_data().into() {
+                    UserData::Recv(idx) => {
+                        self.read_wait_queue
+                            .push_back((idx, complete.result() as usize));
+                    }
+                    UserData::Send(idx) => {
+                        self.send_free_queue.push_back(idx);
+                    }
                 }
-                UserData::Send(idx) => {
-                    self.send_free_queue.push_back(idx);
-                }
+            } else {
+                log::error!("Error: {}", complete.result());
             }
         }
 
-        if let Some(idx) = self.read_wait_queue.pop_front() {
+        if let Some((idx, len)) = self.read_wait_queue.pop_front() {
             let pkt = &mut self.read_bufs[idx];
-            let len = pkt.buf.len();
             buf[..len].copy_from_slice(&pkt.buf[..len]);
 
-            let recvmsg_e = opcode::RecvMsg::new(types::Fd(self.sockfd), pkt.msg.as_mut_ptr()).build()
+            let recvmsg_e = opcode::RecvMsg::new(types::Fd(self.sockfd), &mut pkt.msg)
+                .build()
                 .user_data(UserData::Recv(idx).into())
                 .flags(squeue::Flags::ASYNC)
                 .into();
 
             unsafe {
                 self.ring
-                    .submission().push(&recvmsg_e)
+                    .submission()
+                    .push(&recvmsg_e)
                     .expect("Should push recvmsg to io_uring");
             }
 
@@ -210,7 +231,10 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2IoUring<QUEUE> {
 
             Ok((len, pkt.addr.as_socket().expect("Should be addr")))
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "No data to read"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "No data to read",
+            ))
         }
     }
 
@@ -233,8 +257,8 @@ mod tests {
 
     #[test]
     fn send_single_msg() {
-        let mut socket1 = UdpSocket2IoUring::<1024>::new("127.0.0.1:0");
-        let mut socket2 = UdpSocket2IoUring::<1024>::new("127.0.0.1:0");
+        let mut socket1 = UdpSocket2IoUring::<8>::new("127.0.0.1:0");
+        let mut socket2 = UdpSocket2IoUring::<8>::new("127.0.0.1:0");
 
         socket1
             .add_send_to(&[1, 2, 3, 4], socket2.local_addr())
@@ -253,23 +277,25 @@ mod tests {
 
     #[test]
     fn send_multi_msgs() {
-        let mut socket1 = UdpSocket2IoUring::<1024>::new("127.0.0.1:0");
-        let mut socket2 = UdpSocket2IoUring::<1024>::new("127.0.0.1:0");
+        let mut socket1 = UdpSocket2IoUring::<8>::new("127.0.0.1:0");
+        let mut socket2 = UdpSocket2IoUring::<8>::new("127.0.0.1:0");
 
         let addr1 = socket1.local_addr();
         let addr2 = socket2.local_addr();
 
-        socket1.add_send_to(&[1], addr2).expect("Should ok");
-        socket1.add_send_to(&[2], addr2).expect("Should ok");
-        socket1.add_send_to(&[3], addr2).expect("Should ok");
-        socket1.commit_send_to().expect("Should ok");
-        std::thread::sleep(Duration::from_millis(100));
+        for _ in 0..20 {
+            socket1.add_send_to(&[1], addr2).expect("Should ok");
+            socket1.add_send_to(&[2], addr2).expect("Should ok");
+            socket1.add_send_to(&[3], addr2).expect("Should ok");
+            socket1.commit_send_to().expect("Should ok");
+            std::thread::sleep(Duration::from_millis(100));
 
-        for i in 1..=3 {
-            let mut buf = [0; 1500];
-            assert_eq!(socket2.recv_from(&mut buf).unwrap(), (1, addr1));
-            assert_eq!(&buf[0..1], &[i]);
+            for i in 1..=3 {
+                let mut buf = [0; 1500];
+                assert_eq!(socket2.recv_from(&mut buf).unwrap(), (1, addr1));
+                assert_eq!(&buf[0..1], &[i]);
+            }
+            socket2.finish_read_from().expect("Should ok");
         }
-        socket2.finish_read_from().expect("Should ok");
     }
 }
