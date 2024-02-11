@@ -17,4 +17,6 @@ parking_lot = "0.12.1"
 crossbeam = "0.8.4"
 socket2 = "0.5.5"
 nix = { version = "0.27.1", features=["socket", "uio", "net"] }
+io-uring = "0.6.3"
+libc = "0.2.153"
 bytes = "1.5.0"

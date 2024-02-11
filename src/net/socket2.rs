@@ -5,6 +5,7 @@ use socket2::{Domain, Socket, Type};
 use super::UdpSocketGeneric;
 
 pub struct UdpSocket2 {
+    buf: [u8; 1500],
     socket: UdpSocket,
     local_addr: SocketAddr,
 }
@@ -30,6 +31,7 @@ impl UdpSocket2 {
         let socket: UdpSocket = socket.into();
 
         UdpSocket2 {
+            buf: [0; 1500],
             local_addr: socket.local_addr().expect("Should get local addr"),
             socket,
         }
@@ -49,7 +51,12 @@ impl UdpSocketGeneric for UdpSocket2 {
         Ok(())
     }
 
-    fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
-        self.socket.recv_from(buf)
+    fn recv_from(&mut self) -> Result<(&[u8], SocketAddr), std::io::Error> {
+        let (size, remote) = self.socket.recv_from(&mut self.buf)?;
+        Ok((&self.buf[0..size], remote))
+    }
+
+    fn finish_read_from(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
     }
 }
