@@ -75,8 +75,10 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2Mmsg<QUEUE> {
     }
 
     fn commit_send_to(&mut self) -> Result<(), std::io::Error> {
+        let size = self.queue_len;
+        self.queue_len = 0;
         let mut iovs = vec![];
-        for i in 0..self.queue_len {
+        for i in 0..size {
             let (buf, len) = &self.bufs[i];
             iovs.push([IoSlice::new(&buf[0..*len])]);
         }
@@ -85,7 +87,7 @@ impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2Mmsg<QUEUE> {
             self.sockfd,
             &mut self.data,
             &iovs,
-            &self.addrs[0..self.queue_len],
+            &self.addrs[0..size],
             [],
             MsgFlags::empty(),
         )?;

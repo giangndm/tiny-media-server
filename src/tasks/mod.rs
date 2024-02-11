@@ -3,6 +3,7 @@ use std::{
     time::Instant,
 };
 
+use bytes::Bytes;
 use str0m::{
     media::{KeyframeRequestKind, MediaKind, MediaTime},
     rtp::{RtpHeader, RtpPacket, SeqNo},
@@ -29,7 +30,7 @@ pub struct TrackMedia {
     pub header: RtpHeader,
 
     /// RTP payload. This contains no header.
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
 
     /// str0m server timestamp.
     ///

@@ -10,7 +10,7 @@ clap = { version = "4.4.18", features = ["derive", "env"] }
 log = "0.4.20"
 tiny_http = "0.12.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "std"] }
-str0m = { git = "https://github.com/algesten/str0m.git", branch = "main" }
+str0m = { git = "https://github.com/giangndm/str0m.git", branch = "optimize" }
 faster-stun = "1.0.2"
 bus = "2.4.1"
 parking_lot = "0.12.1"
@@ -19,3 +19,4 @@ socket2 = "0.5.5"
 nix = { version = "0.27.1", features=["socket", "uio", "net"] }
 io-uring = "0.6.3"
 libc = "0.2.153"
+bytes = "1.5.0"

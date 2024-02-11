@@ -843,8 +843,9 @@ dependencies = [
 [[package]]
 name = "str0m"
 version = "0.4.1"
-source = "git+https://github.com/algesten/str0m.git?branch=main#a3312436fd0a1ef35bf8e934de204d575c39ad86"
+source = "git+https://github.com/giangndm/str0m.git?branch=optimize#fb81129cca34042e57c06188f6780b63a9f32edf"
 dependencies = [
+ "bytes",
  "combine",
  "crc",
  "fastrand",
@@ -917,6 +918,7 @@ name = "tiny-media-server"
 version = "0.1.0"
 dependencies = [
  "bus",
+ "bytes",
  "clap",
  "crossbeam",
  "faster-stun",

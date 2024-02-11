@@ -314,6 +314,9 @@ impl Worker {
                 &mut self.ended_tasks,
             );
         }
+        if let Err(e) = self.udp_socket.commit_send_to() {
+            log::error!("Failed to commit send to: {e}");
+        }
     }
 
     fn pop_task(
@@ -376,9 +379,6 @@ impl Worker {
                     task.sub_channels.push(track_id);
                 }
             }
-        }
-        if let Err(e) = udp_socket.commit_send_to() {
-            log::error!("Failed to commit send to: {e}");
         }
     }
 
