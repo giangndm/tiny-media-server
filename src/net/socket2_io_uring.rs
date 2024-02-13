@@ -205,7 +205,10 @@ impl<const SEND_QUEUE: usize, const RECV_QUEUE: usize> UdpSocket2IoUring<SEND_QU
                     }
                 }
                 UserData::Send(idx) => {
-                    self.send_free_queue.push_back(idx);
+                    //TODO maybe need to check flag with IORING_CQE_F_NOTIF
+                    if !is_more {
+                        self.send_free_queue.push_back(idx);
+                    }
                 }
                 UserData::ProvideBuffers(_) => {}
             }
@@ -236,7 +239,7 @@ impl<const SEND_QUEUE: usize, const RECV_QUEUE: usize> UdpSocketGeneric
         pkt.iovecs[0].iov_len = buf.len();
         pkt.msg.msg_namelen = pkt.addr.len();
 
-        let sendmsg_e = opcode::SendMsg::new(types::Fd(self.sockfd), &pkt.msg)
+        let sendmsg_e = opcode::SendMsgZc::new(types::Fd(self.sockfd), &pkt.msg)
             .build()
             .user_data(UserData::Send(pkt_idx).into())
             .into();
