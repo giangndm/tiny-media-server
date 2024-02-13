@@ -54,6 +54,8 @@ impl<const QUEUE: usize> UdpSocket2Mmsg<QUEUE> {
 }
 
 impl<const QUEUE: usize> UdpSocketGeneric for UdpSocket2Mmsg<QUEUE> {
+    fn prepare(&mut self) {}
+
     fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }

@@ -106,6 +106,10 @@ impl Worker {
         }
     }
 
+    pub fn prepare(&mut self) {
+        self.udp_socket.prepare();
+    }
+
     pub fn process_cycle(&mut self) -> Option<()> {
         let started = Instant::now();
         self.process_bus_recv();

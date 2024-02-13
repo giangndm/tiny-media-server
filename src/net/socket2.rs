@@ -39,6 +39,8 @@ impl UdpSocket2 {
 }
 
 impl UdpSocketGeneric for UdpSocket2 {
+    fn prepare(&mut self) {}
+
     fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }

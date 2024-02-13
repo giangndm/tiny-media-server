@@ -32,6 +32,7 @@ impl Controller {
             let thread = std::thread::spawn(move || {
                 let bus_rx = bus.lock().add_rx();
                 let mut worker = Worker::new(ip_addr, worker_send, receiver, bus, bus_rx);
+                worker.prepare();
                 while let Some(_) = worker.process_cycle() {
                     // Do nothing
                 }

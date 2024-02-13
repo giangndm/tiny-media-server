@@ -14,6 +14,7 @@ pub mod socket2_mmsg;
 pub mod socket2_io_uring;
 
 pub trait UdpSocketGeneric {
+    fn prepare(&mut self);
     fn local_addr(&self) -> SocketAddr;
     fn add_send_to(&mut self, buf: &[u8], addr: SocketAddr) -> Result<usize, std::io::Error>;
     fn commit_send_to(&mut self) -> Result<(), std::io::Error>;
