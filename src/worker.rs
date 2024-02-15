@@ -18,7 +18,7 @@ const CYCLE_MS: Duration = Duration::from_millis(1);
 type UdpSocket = net::socket2_io_uring::UdpSocket2IoUring<2048, 2048>;
 
 #[cfg(any(target_os = "freebsd", target_os = "netbsd",))]
-type UdpSocket = net::socket2_mmsg::UdpSocket2Mmsg<48>;
+type UdpSocket = net::socket2_mmsg::UdpSocket2Mmsg<1024>;
 
 #[cfg(not(any(
     target_os = "linux",
